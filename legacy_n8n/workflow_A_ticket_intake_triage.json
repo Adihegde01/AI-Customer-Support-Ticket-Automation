@@ -1,0 +1,952 @@
+{
+  "name": "Workflow A - Support Ticket Intake & Triage",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "labelIds": [
+            "support-inbox"
+          ]
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "id": "a1-gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CREDENTIALS",
+          "name": "Gmail Support Inbox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "meta-1",
+              "name": "senderName",
+              "value": "={{ ($json.from?.value?.[0]?.name) || ($json.From || '').replace(/<.*>/, '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "meta-2",
+              "name": "senderEmail",
+              "value": "={{ ($json.from?.value?.[0]?.address) || (($json.From || '').match(/<(.+)>/) || [])[1] || $json.From }}",
+              "type": "string"
+            },
+            {
+              "id": "meta-3",
+              "name": "subject",
+              "value": "={{ $json.subject || $json.Subject || '(no subject)' }}",
+              "type": "string"
+            },
+            {
+              "id": "meta-4",
+              "name": "body",
+              "value": "={{ $json.text || $json.textPlain || $json.snippet || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "meta-5",
+              "name": "receivedAt",
+              "value": "={{ $json.date || $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "meta-6",
+              "name": "messageId",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "meta-7",
+              "name": "threadId",
+              "value": "={{ $json.threadId }}",
+              "type": "string"
+            },
+            {
+              "id": "meta-8",
+              "name": "hasAttachments",
+              "value": "={{ Object.keys($binary || {}).length > 0 }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "a2-set-metadata",
+      "name": "Set - Email Metadata",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "if-att-1",
+              "leftValue": "={{ $json.hasAttachments }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a3-if-attachments",
+      "name": "IF - Has Attachments",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: \"Prepare Attachments\"\n// Attachments are already downloaded as binary by the Gmail Trigger\n// (downloadAttachments: true). This node normalizes their metadata so the\n// Airtable attach step can iterate them, and passes binaries straight\n// through — no local disk staging needed.\nconst item = $input.first();\nconst attachmentMeta = Object.entries(item.binary || {}).map(([key, bin]) => ({\n  binaryKey: key,\n  fileName: bin.fileName || key,\n  mimeType: bin.mimeType || 'application/octet-stream',\n}));\nreturn [{ json: { ...item.json, attachmentMeta }, binary: item.binary }];"
+      },
+      "id": "a4-prepare-attachments",
+      "name": "Code - Prepare Attachments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 180],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "a5-merge",
+      "name": "Merge - Attachment Branches",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Customers",
+          "mode": "name"
+        },
+        "filterByFormula": "=LOWER({Email}) = LOWER(\"{{ $json.senderEmail }}\")",
+        "returnAll": false,
+        "limit": 1,
+        "options": {}
+      },
+      "id": "a6-airtable-vip",
+      "name": "Airtable - Lookup VIP Customer",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1100, 300],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: \"Merge VIP Flag\"\n// If the Customers lookup found a record, carry its VIP flag forward.\n// If absent, the VIP override rule is skipped gracefully (vip_flag = false).\nconst meta = $('Merge - Attachment Branches').first().json;\nconst lookup = $input.first().json;\nconst vip_flag = !!(lookup && lookup.fields && (lookup.fields['VIP Flag'] === true));\nreturn [{ json: { ...meta, vip_flag }, binary: $('Merge - Attachment Branches').first().binary }];"
+      },
+      "id": "a7-code-vip",
+      "name": "Code - Merge VIP Flag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-5',\n  max_tokens: 1200,\n  temperature: 0,\n  system: \"You are a customer support triage engine. Analyze the incoming support email and return structured ticket data. Return ONLY valid JSON — no markdown, no commentary, no code fences. Base every field strictly on the email content; never fabricate details not present in the message. Detect and note the original language of the email, and respond in English regardless of input language.\\n\\nAllowed categories: [\\\"Technical Support\\\", \\\"Billing\\\", \\\"Sales Inquiry\\\", \\\"Feature Request\\\", \\\"Bug Report\\\", \\\"Account Access\\\", \\\"Refund Request\\\", \\\"General Inquiry\\\", \\\"Other\\\"]\\nAllowed priority levels: [\\\"Critical\\\", \\\"High\\\", \\\"Medium\\\", \\\"Low\\\"]\\nAllowed sentiment values: [\\\"Positive\\\", \\\"Neutral\\\", \\\"Negative\\\"]\\n\\nPriority guidance:\\n- Critical: production outage, security issue, data loss, payment/billing failure actively blocking business, or explicit escalation language.\\n- High: feature broken with no workaround, angry/frustrated tone, paying customer at risk of churn.\\n- Medium: functional issue with workaround, general bug reports, standard billing questions.\\n- Low: general questions, feature requests, informational inquiries.\\n\\nOutput schema:\\n{\\\"customer_name\\\": string|null, \\\"company\\\": string|null, \\\"issue_summary\\\": string (1 sentence), \\\"detailed_description\\\": string (2-4 sentences, paraphrased not copied), \\\"category\\\": one of allowed categories, \\\"priority\\\": one of allowed priority levels, \\\"priority_justification\\\": string (1-2 sentences), \\\"sentiment\\\": one of allowed sentiment values, \\\"product_service\\\": string|null, \\\"suggested_department\\\": string, \\\"suggested_tags\\\": string[], \\\"detected_language\\\": string (ISO 639-1), \\\"confidence_score\\\": number (0-1)}\",\n  messages: [\n    {\n      role: 'user',\n      content: 'Email Subject: \"' + $json.subject + '\"\\nEmail Body:\\n\"\"\"\\n' + $json.body + '\\n\"\"\"\\n\\nReturn the JSON object now.'\n    }\n  ]\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "a8-http-claude",
+      "name": "HTTP Request - Claude Ticket Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ANTHROPIC_API_KEY",
+          "name": "Anthropic API (x-api-key header)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: \"Validate & Clean AI Output\"\nfunction safeJsonParse(raw) {\n  try {\n    const cleaned = raw.replace(/```json|```/g, '').trim();\n    return JSON.parse(cleaned);\n  } catch (e) {\n    throw new Error(`AI_JSON_PARSE_ERROR: ${e.message} | raw: ${String(raw).slice(0, 200)}`);\n  }\n}\n\nconst ALLOWED_CATEGORIES = [\"Technical Support\",\"Billing\",\"Sales Inquiry\",\n  \"Feature Request\",\"Bug Report\",\"Account Access\",\"Refund Request\",\n  \"General Inquiry\",\"Other\"];\nconst ALLOWED_PRIORITIES = [\"Critical\",\"High\",\"Medium\",\"Low\"];\nconst ALLOWED_SENTIMENT = [\"Positive\",\"Neutral\",\"Negative\"];\n\nfunction normalizeEnum(value, allowed, fallback) {\n  if (!value) return fallback;\n  const match = allowed.find(a => a.toLowerCase() === String(value).toLowerCase());\n  return match || fallback;\n}\n\nfunction dedupeTags(tags) {\n  return [...new Set((tags || []).map(t => String(t).trim().toLowerCase()))]\n    .filter(Boolean)\n    .map(t => t.charAt(0).toUpperCase() + t.slice(1));\n}\n\nfunction validateEmail(email) {\n  const re = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n  return email && re.test(email) ? String(email).toLowerCase() : null;\n}\n\nconst raw = $input.first().json.content?.[0]?.text || $input.first().json.text;\nlet data;\nlet parseFailed = false;\ntry {\n  data = safeJsonParse(raw);\n} catch (e) {\n  // Malformed-response policy: never silently drop a ticket. Fall back to\n  // safe defaults, keep the raw output for agent visibility, and flag review.\n  parseFailed = true;\n  data = {};\n}\n\nconst cleaned = {\n  customer_name: data.customer_name?.trim() || 'Unknown',\n  company: data.company?.trim() || null,\n  issue_summary: data.issue_summary?.trim() || 'No summary generated',\n  detailed_description: data.detailed_description?.trim() || '',\n  category: normalizeEnum(data.category, ALLOWED_CATEGORIES, 'General Inquiry'),\n  priority: normalizeEnum(data.priority, ALLOWED_PRIORITIES, 'Medium'),\n  priority_justification: data.priority_justification?.trim() || '',\n  sentiment: normalizeEnum(data.sentiment, ALLOWED_SENTIMENT, 'Neutral'),\n  product_service: data.product_service?.trim() || null,\n  suggested_department: data.suggested_department?.trim() || 'General Support',\n  suggested_tags: dedupeTags(data.suggested_tags),\n  detected_language: data.detected_language || 'en',\n  confidence_score: typeof data.confidence_score === 'number'\n    ? Math.min(1, Math.max(0, data.confidence_score)) : 0.5,\n};\n\n// Fallback: use sender email from metadata, never rely solely on AI-guessed email\nconst meta = $('Code - Merge VIP Flag').first().json;\ncleaned.sender_email = validateEmail(meta.senderEmail);\ncleaned.vip_flag = meta.vip_flag;\n\n// Low-confidence guard: force human review regardless of category/priority\ncleaned.needs_manual_review = parseFailed || cleaned.confidence_score < 0.6;\ncleaned.raw_ai_output_note = parseFailed\n  ? `AI JSON parse failed. Raw output: ${String(raw).slice(0, 1000)}`\n  : '';\n\nreturn [{ json: { ...meta, ...cleaned }, binary: $('Code - Merge VIP Flag').first().binary }];"
+      },
+      "id": "a9-code-validate",
+      "name": "Code - Validate & Clean AI Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: \"Priority Business Rules\" (AI + deterministic hybrid)\nlet priority = $json.priority;\nconst bodyLower = ($json.detailed_description + ' ' + $json.body).toLowerCase();\n\nconst CRITICAL_KEYWORDS = ['outage', 'down', 'security breach', 'data loss', 'cannot login for all users', 'payment failed for all'];\nconst HIGH_KEYWORDS = ['urgent', 'asap', 'escalate', 'angry', 'cancel my subscription'];\n\n// Deterministic override: keyword match forces minimum priority floor\nif (CRITICAL_KEYWORDS.some(k => bodyLower.includes(k))) {\n  priority = 'Critical';\n} else if (HIGH_KEYWORDS.some(k => bodyLower.includes(k)) && priority === 'Medium') {\n  priority = 'High';\n}\n\n// VIP customer override (populated by the earlier Airtable lookup)\nconst isVip = $json.vip_flag === true;\nif (isVip && priority === 'Low') priority = 'Medium';\n\nreturn [{ json: { ...$json, priority, priority_source: priority !== $json.priority ? 'business_rule_override' : 'ai' }, binary: $input.first().binary }];"
+      },
+      "id": "a10-code-priority",
+      "name": "Code - Priority Business Rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, 300]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Tickets",
+          "mode": "name"
+        },
+        "filterByFormula": "=AND(OR({Status} = \"Open\", {Status} = \"In Progress\"), IS_AFTER({Received At}, DATEADD(NOW(), -7, \"days\")), LOWER({Sender Email}) = LOWER(\"{{ $json.sender_email }}\"))",
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "a11-airtable-dup-search",
+      "name": "Airtable - Search Recent Open Tickets",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [2200, 300],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: \"Duplicate Ticket Check\" (bonus)\n// Idempotency first: exact Gmail messageId match means this trigger re-fired\n// on an already-processed email — treat as hard duplicate.\n// Then fuzzy match: same sender + issue-summary token overlap >= 0.6 within\n// the 7-day window of open tickets fetched by the previous node.\nconst ticket = $('Code - Priority Business Rules').first().json;\nconst candidates = $input.all().map(i => i.json).filter(j => j && j.fields);\n\nfunction tokenSet(s) {\n  return new Set(String(s || '').toLowerCase().replace(/[^a-z0-9\\s]/g, '').split(/\\s+/).filter(w => w.length > 3));\n}\nfunction similarity(a, b) {\n  const A = tokenSet(a), B = tokenSet(b);\n  if (!A.size || !B.size) return 0;\n  let inter = 0;\n  for (const t of A) if (B.has(t)) inter++;\n  return inter / Math.min(A.size, B.size);\n}\n\nlet duplicateOf = null;\nfor (const c of candidates) {\n  if (c.fields['Message ID'] && c.fields['Message ID'] === ticket.messageId) {\n    duplicateOf = c; break; // idempotency: already processed this exact email\n  }\n  const sim = Math.max(\n    similarity(ticket.issue_summary, c.fields['Issue Summary']),\n    similarity(ticket.subject, c.fields['Email Subject'])\n  );\n  if (sim >= 0.6) { duplicateOf = c; break; }\n}\n\nreturn [{ json: {\n  ...ticket,\n  is_duplicate: !!duplicateOf,\n  duplicate_record_id: duplicateOf ? duplicateOf.id : null,\n  duplicate_ticket_id: duplicateOf ? duplicateOf.fields['Ticket ID'] : null,\n  duplicate_existing_notes: duplicateOf ? (duplicateOf.fields['Internal Notes'] || '') : '',\n}, binary: $('Code - Priority Business Rules').first().binary }];"
+      },
+      "id": "a12-code-dup-check",
+      "name": "Code - Duplicate Ticket Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "if-dup-1",
+              "leftValue": "={{ $json.is_duplicate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a13-if-duplicate",
+      "name": "IF - Duplicate Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2640, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Tickets",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.duplicate_record_id }}",
+            "Internal Notes": "={{ $json.duplicate_existing_notes + '\\n\\n[' + $now.toISO() + '] Duplicate follow-up from ' + $json.sender_email + ' (messageId ' + $json.messageId + '):\\n' + $json.body.slice(0, 2000) }}"
+          },
+          "matchingColumns": ["id"]
+        },
+        "options": {}
+      },
+      "id": "a14-airtable-append-dup",
+      "name": "Airtable - Append To Existing Ticket",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [2860, 140],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Tickets",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Customer Name": "={{ $json.customer_name }}",
+            "Company": "={{ $json.company }}",
+            "Sender Email": "={{ $json.sender_email }}",
+            "Email Subject": "={{ $json.subject }}",
+            "Email Body": "={{ $json.body }}",
+            "Issue Summary": "={{ $json.issue_summary }}",
+            "Detailed Description": "={{ $json.detailed_description }}",
+            "Category": "={{ $json.category }}",
+            "Priority": "={{ $json.priority }}",
+            "Priority Justification": "={{ $json.priority_justification }}",
+            "Priority Source": "={{ $json.priority_source }}",
+            "Sentiment": "={{ $json.sentiment }}",
+            "Product/Service": "={{ $json.product_service }}",
+            "Suggested Department": "={{ $json.suggested_department }}",
+            "Tags": "={{ $json.suggested_tags }}",
+            "Detected Language": "={{ $json.detected_language }}",
+            "Confidence Score": "={{ $json.confidence_score }}",
+            "Needs Manual Review": "={{ $json.needs_manual_review }}",
+            "Status": "Open",
+            "Internal Notes": "={{ $json.raw_ai_output_note }}",
+            "Message ID": "={{ $json.messageId }}",
+            "Thread ID": "={{ $json.threadId }}",
+            "VIP Flag": "={{ $json.vip_flag }}",
+            "Received At": "={{ $json.receivedAt }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "id": "a15-airtable-create",
+      "name": "Airtable - Create Ticket Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [2860, 460],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "ConfigTeamMapping",
+          "mode": "name"
+        },
+        "filterByFormula": "={Category} = \"{{ $('Code - Duplicate Ticket Check').first().json.category }}\"",
+        "returnAll": false,
+        "limit": 1,
+        "options": {}
+      },
+      "id": "a16-airtable-team-map",
+      "name": "Airtable - Lookup Team Mapping",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [3080, 460],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: \"Resolve Assignment & SLA\"\n// Team comes from the configurable ConfigTeamMapping table (not hardcoded);\n// unmapped categories fall back to Customer Success. SLA targets mirror the\n// SLATargets config table defaults.\nconst mapping = $input.first().json;\nconst ticket = $('Code - Duplicate Ticket Check').first().json;\nconst created = $('Airtable - Create Ticket Record').first().json;\n\nconst assignedTeam = (mapping && mapping.fields && mapping.fields['Assigned Team']) || 'Customer Success';\n\nconst SLA_ESTIMATES = {\n  Critical: '1 hour',\n  High: '4 hours',\n  Medium: '1 business day',\n  Low: '2 business days',\n};\n\nreturn [{ json: {\n  ...ticket,\n  airtable_record_id: created.id,\n  ticket_id: created.fields['Ticket ID'] || created.id,\n  assigned_team: assignedTeam,\n  sla_estimate: SLA_ESTIMATES[ticket.priority] || '1 business day',\n} }];"
+      },
+      "id": "a17-code-assignment",
+      "name": "Code - Resolve Assignment & SLA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3300, 460]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Tickets",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.airtable_record_id }}",
+            "Assigned Team": "={{ $json.assigned_team }}"
+          },
+          "matchingColumns": ["id"]
+        },
+        "options": {}
+      },
+      "id": "a18-airtable-assign",
+      "name": "Airtable - Update Assigned Team",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [3520, 460],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ack-1",
+              "name": "ackSubject",
+              "value": "=We've received your request — Ticket #{{ $json.ticket_id }}",
+              "type": "string"
+            },
+            {
+              "id": "ack-2",
+              "name": "ackBody",
+              "value": "=Hi {{ $json.customer_name === 'Unknown' ? 'there' : $json.customer_name }},\n\nThanks for reaching out. This confirms we've received your request:\n\nTicket ID: {{ $json.ticket_id }}\nSummary: {{ $json.issue_summary }}\nStatus: Open\nEstimated first response: {{ $json.sla_estimate }}\n\nOur {{ $json.assigned_team }} team will follow up shortly. You can reply directly to this email to add more details.\n\nBest regards,\nAcme SaaS Support Team",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "a19-set-ack",
+      "name": "Set - Ack Email Content",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [3740, 460]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $json.messageId }}",
+        "message": "={{ $json.ackBody }}",
+        "options": {
+          "replyToSenderOnly": true
+        }
+      },
+      "id": "a20-gmail-ack",
+      "name": "Gmail - Send Acknowledgment",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [3960, 460],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CREDENTIALS",
+          "name": "Gmail Support Inbox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Tickets",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Code - Resolve Assignment & SLA').first().json.airtable_record_id }}",
+            "Ack Sent At": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": ["id"]
+        },
+        "options": {}
+      },
+      "id": "a21-airtable-ack-sent",
+      "name": "Airtable - Mark Ack Sent",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [4180, 460],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "sw-1",
+                    "leftValue": "={{ $('Code - Resolve Assignment & SLA').first().json.priority }}",
+                    "rightValue": "Critical",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Critical"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "sw-2",
+                    "leftValue": "={{ $('Code - Resolve Assignment & SLA').first().json.priority }}",
+                    "rightValue": "High",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "High"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      },
+      "id": "a22-switch-priority",
+      "name": "Switch - Priority Notification",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [4400, 460]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#support-oncall",
+          "mode": "name"
+        },
+        "text": "=:rotating_light: *{{ $('Code - Resolve Assignment & SLA').first().json.priority }} ticket* {{ $('Code - Resolve Assignment & SLA').first().json.ticket_id }}\n*Summary:* {{ $('Code - Resolve Assignment & SLA').first().json.issue_summary.replace(/[<>&*_`]/g, '') }}\n*Team:* {{ $('Code - Resolve Assignment & SLA').first().json.assigned_team }} | *Sentiment:* {{ $('Code - Resolve Assignment & SLA').first().json.sentiment }}\n<https://airtable.com/AIRTABLE_BASE_ID/Tickets/{{ $('Code - Resolve Assignment & SLA').first().json.airtable_record_id }}|Open in Airtable>",
+        "otherOptions": {}
+      },
+      "id": "a23-slack-alert",
+      "name": "Slack - Post Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [4620, 460],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CREDENTIALS",
+          "name": "Slack Support Ops"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set - Email Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Email Metadata": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Attachments": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge - Attachment Branches",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Attachments": {
+      "main": [
+        [
+          {
+            "node": "Merge - Attachment Branches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge - Attachment Branches": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Lookup VIP Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Lookup VIP Customer": {
+      "main": [
+        [
+          {
+            "node": "Code - Merge VIP Flag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Merge VIP Flag": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Claude Ticket Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Claude Ticket Analysis": {
+      "main": [
+        [
+          {
+            "node": "Code - Validate & Clean AI Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validate & Clean AI Output": {
+      "main": [
+        [
+          {
+            "node": "Code - Priority Business Rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Priority Business Rules": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Search Recent Open Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Search Recent Open Tickets": {
+      "main": [
+        [
+          {
+            "node": "Code - Duplicate Ticket Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Duplicate Ticket Check": {
+      "main": [
+        [
+          {
+            "node": "IF - Duplicate Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Duplicate Found": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Append To Existing Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Airtable - Create Ticket Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Create Ticket Record": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Lookup Team Mapping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Lookup Team Mapping": {
+      "main": [
+        [
+          {
+            "node": "Code - Resolve Assignment & SLA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Resolve Assignment & SLA": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Update Assigned Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Update Assigned Team": {
+      "main": [
+        [
+          {
+            "node": "Set - Ack Email Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Ack Email Content": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Send Acknowledgment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Send Acknowledgment": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Mark Ack Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Mark Ack Sent": {
+      "main": [
+        [
+          {
+            "node": "Switch - Priority Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch - Priority Notification": {
+      "main": [
+        [
+          {
+            "node": "Slack - Post Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack - Post Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "workflow_error_handler",
+    "saveExecutionProgress": true
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "template"
+  }
+}

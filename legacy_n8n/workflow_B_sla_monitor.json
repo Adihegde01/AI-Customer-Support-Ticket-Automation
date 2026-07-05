@@ -1,0 +1,246 @@
+{
+  "name": "Workflow B - SLA Monitor & Escalation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "b1-schedule",
+      "name": "Schedule Trigger - Every 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Tickets",
+          "mode": "name"
+        },
+        "filterByFormula": "=AND(OR({Status} = \"Open\", {Status} = \"In Progress\", {Status} = \"Waiting for Customer\"), {Escalated} = FALSE())",
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "b2-airtable-open",
+      "name": "Airtable - Get Open Tickets",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [220, 300],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: \"Compute SLA Breach\"\n// SLA targets by priority (minutes). Mirrors the SLATargets config table;\n// swap for an Airtable lookup if targets must be editable without n8n access.\nconst SLA_MINUTES = {\n  Critical: 60,          // 1 hour\n  High: 240,             // 4 hours\n  Medium: 24 * 60,       // 1 business day (approximated as 24h in v1)\n  Low: 48 * 60,          // 2 business days (approximated as 48h in v1)\n};\nconst NEAR_BREACH_RATIO = 0.8;\n\nconst out = [];\nfor (const item of $input.all()) {\n  const f = item.json.fields;\n  if (!f || !f['Received At']) continue; // no timestamp -> cannot evaluate; skip (no-op, not an error)\n  const receivedAt = new Date(f['Received At']).getTime();\n  const targetMin = SLA_MINUTES[f['Priority']] || SLA_MINUTES.Medium;\n  const ageMin = (Date.now() - receivedAt) / 60000;\n  const ratio = ageMin / targetMin;\n  if (ratio >= NEAR_BREACH_RATIO) {\n    out.push({ json: {\n      record_id: item.json.id,\n      ticket_id: f['Ticket ID'] || item.json.id,\n      priority: f['Priority'] || 'Medium',\n      assigned_team: f['Assigned Team'] || 'Customer Success',\n      issue_summary: f['Issue Summary'] || '',\n      age_minutes: Math.round(ageMin),\n      target_minutes: targetMin,\n      breached: ratio >= 1,\n      near_breach: ratio >= NEAR_BREACH_RATIO && ratio < 1,\n    }});\n  }\n}\n// No open tickets past threshold: normal exit, not an error.\nreturn out;"
+      },
+      "id": "b3-code-sla",
+      "name": "Code - Compute SLA Breach",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "b-if-1",
+              "leftValue": "={{ $json.breached || $json.near_breach }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b4-if-breach",
+      "name": "IF - Breached or Near-Breach",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: \"Bump Priority One Level\" — only for actual breaches, not near-breaches\nconst ORDER = ['Low', 'Medium', 'High', 'Critical'];\nconst out = [];\nfor (const item of $input.all()) {\n  const j = item.json;\n  let newPriority = j.priority;\n  if (j.breached) {\n    const idx = ORDER.indexOf(j.priority);\n    newPriority = ORDER[Math.min(idx + 1, ORDER.length - 1)] || 'Medium';\n  }\n  out.push({ json: { ...j, new_priority: newPriority } });\n}\nreturn out;"
+      },
+      "id": "b5-code-bump",
+      "name": "Code - Bump Priority One Level",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Tickets",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.record_id }}",
+            "Escalated": true,
+            "Priority": "={{ $json.new_priority }}"
+          },
+          "matchingColumns": ["id"]
+        },
+        "options": {}
+      },
+      "id": "b6-airtable-escalate",
+      "name": "Airtable - Flag Escalated",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1100, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#support-oncall",
+          "mode": "name"
+        },
+        "text": "=:hourglass_flowing_sand: *SLA {{ $('Code - Bump Priority One Level').item.json.breached ? 'BREACH' : 'warning (80%)' }}* — Ticket {{ $('Code - Bump Priority One Level').item.json.ticket_id }}\n*Summary:* {{ $('Code - Bump Priority One Level').item.json.issue_summary.replace(/[<>&*_`]/g, '') }}\n*Priority:* {{ $('Code - Bump Priority One Level').item.json.new_priority }} | *Team:* {{ $('Code - Bump Priority One Level').item.json.assigned_team }}\n*Age:* {{ $('Code - Bump Priority One Level').item.json.age_minutes }} min (target {{ $('Code - Bump Priority One Level').item.json.target_minutes }} min)\ncc <!subteam^TEAM_LEAD_GROUP_ID> team lead",
+        "otherOptions": {}
+      },
+      "id": "b7-slack-escalation",
+      "name": "Slack - Escalation Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1320, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CREDENTIALS",
+          "name": "Slack Support Ops"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger - Every 15 min": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Get Open Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Get Open Tickets": {
+      "main": [
+        [
+          {
+            "node": "Code - Compute SLA Breach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Compute SLA Breach": {
+      "main": [
+        [
+          {
+            "node": "IF - Breached or Near-Breach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Breached or Near-Breach": {
+      "main": [
+        [
+          {
+            "node": "Code - Bump Priority One Level",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Bump Priority One Level": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Flag Escalated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Flag Escalated": {
+      "main": [
+        [
+          {
+            "node": "Slack - Escalation Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "workflow_error_handler"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "template"
+  }
+}

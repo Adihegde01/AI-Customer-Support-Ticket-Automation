@@ -1,0 +1,134 @@
+{
+  "name": "Global Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "e1-error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: \"Redact PII & Build Error Record\"\n// Truncate and redact the failing payload before it is persisted anywhere:\n// email addresses, phone-like numbers, and card-like digit runs are masked.\nconst err = $input.first().json;\n\nfunction redact(text) {\n  return String(text || '')\n    .replace(/[\\w.+-]+@[\\w-]+\\.[\\w.]+/g, '[EMAIL_REDACTED]')\n    .replace(/\\b(?:\\d[ -]?){13,19}\\b/g, '[CARD_REDACTED]')\n    .replace(/\\+?\\d[\\d ()-]{8,}\\d/g, '[PHONE_REDACTED]');\n}\n\nconst execution = err.execution || {};\nconst lastNodeExecuted = execution.lastNodeExecuted || 'unknown';\nconst message = err.execution?.error?.message || err.trigger?.error?.message || 'Unknown error';\n\n// Severity: transient (retryable upstream) vs persistent\nconst transient = /429|timeout|ETIMEDOUT|ECONNRESET|rate.?limit|503/i.test(message);\n\nreturn [{ json: {\n  workflow_name: err.workflow?.name || 'unknown',\n  failed_node: lastNodeExecuted,\n  error_message: redact(message).slice(0, 1000),\n  payload_snapshot: redact(JSON.stringify(execution.lastNodeExecuted ? (execution.data || {}) : {})).slice(0, 2000),\n  execution_id: execution.id || null,\n  execution_url: execution.url || null,\n  severity: transient ? 'transient' : 'persistent',\n  timestamp: new Date().toISOString(),\n}}];"
+      },
+      "id": "e2-code-redact",
+      "name": "Code - Redact PII & Build Error Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "ErrorLog",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Workflow": "={{ $json.workflow_name }}",
+            "Node": "={{ $json.failed_node }}",
+            "Error Message": "={{ $json.error_message }}",
+            "Payload Snapshot": "={{ $json.payload_snapshot }}",
+            "Severity": "={{ $json.severity }}",
+            "Timestamp": "={{ $json.timestamp }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "id": "e3-airtable-errorlog",
+      "name": "Airtable - Log to ErrorLog",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [440, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#support-ops",
+          "mode": "name"
+        },
+        "text": "=:warning: *n8n workflow error* [{{ $('Code - Redact PII & Build Error Record').first().json.severity }}]\n*Workflow:* {{ $('Code - Redact PII & Build Error Record').first().json.workflow_name }}\n*Node:* {{ $('Code - Redact PII & Build Error Record').first().json.failed_node }}\n*Error:* {{ $('Code - Redact PII & Build Error Record').first().json.error_message }}\n{{ $('Code - Redact PII & Build Error Record').first().json.execution_url ? '<' + $('Code - Redact PII & Build Error Record').first().json.execution_url + '|Open execution>' : '' }}",
+        "otherOptions": {}
+      },
+      "id": "e4-slack-ops",
+      "name": "Slack - Alert #support-ops",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [660, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CREDENTIALS",
+          "name": "Slack Support Ops"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code - Redact PII & Build Error Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Redact PII & Build Error Record": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Log to ErrorLog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Log to ErrorLog": {
+      "main": [
+        [
+          {
+            "node": "Slack - Alert #support-ops",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "template"
+  }
+}

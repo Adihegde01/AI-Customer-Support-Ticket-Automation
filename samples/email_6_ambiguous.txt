@@ -1,0 +1,13 @@
+From: jt2094@gmail.com
+To: support@acmesaas.com
+Subject: question
+
+hey quick thing — the thing from before, is it sorted now or should I do the
+steps again? also do you guys have an office in Berlin? cheers
+
+--- Expected triage ---
+Category: Other (no identifiable product issue or clear intent)
+Priority: Low
+Sentiment: Neutral
+Confidence: low (< 0.6) → Needs Manual Review = true
+Assigned Team: Customer Success (default route)

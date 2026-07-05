@@ -1,0 +1,22 @@
+From: Meera Iyer <meera.iyer@finlywealth.com>
+To: support@acmesaas.com
+Subject: Feature request: export dashboard as scheduled PDF
+
+Hi team,
+
+Love the product — we use the analytics dashboard daily. One thing that would
+save us a lot of time: the ability to schedule a weekly PDF export of a
+dashboard and have it emailed to a distribution list. Right now we screenshot
+it manually every Monday for our leadership review.
+
+Not urgent at all, just wanted to put it on your radar.
+
+Best,
+Meera Iyer
+Finly Wealth
+
+--- Expected triage ---
+Category: Feature Request
+Priority: Low
+Sentiment: Positive
+Assigned Team: Product Team

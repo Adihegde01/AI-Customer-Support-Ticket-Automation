@@ -1,0 +1,267 @@
+{
+  "name": "Workflow C - AI Reply Suggestion (Bonus)",
+  "nodes": [
+    {
+      "parameters": {
+        "multipleMethods": true,
+        "httpMethod": ["GET", "POST"],
+        "path": "suggest-reply",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c1-webhook",
+      "name": "Webhook - Suggest Reply",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "suggest-reply"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Tickets",
+          "mode": "name"
+        },
+        "id": "={{ $json.body?.record_id || $json.query?.record_id }}",
+        "options": {}
+      },
+      "id": "c2-airtable-get-ticket",
+      "name": "Airtable - Get Ticket",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [220, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "KnowledgeBase",
+          "mode": "name"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "c3-airtable-kb",
+      "name": "Airtable - Fetch Knowledge Base",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [440, 300],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: \"Rank KB Snippets\" — lightweight keyword retrieval (RAG bonus).\n// Scores each KnowledgeBase article by token overlap with the ticket's\n// summary + description (BM25-lite: rare ticket tokens weigh via idf-ish\n// dampening is overkill at this scale; simple overlap with length norm works).\n// Top 3 snippets are injected into Prompt 2's ragContext.\nconst ticket = $('Airtable - Get Ticket').first().json;\nconst tf = ticket.fields || {};\nconst queryText = [tf['Issue Summary'], tf['Detailed Description'], tf['Category']].join(' ');\n\nfunction tokens(s) {\n  return String(s || '').toLowerCase().replace(/[^a-z0-9\\s]/g, ' ').split(/\\s+/).filter(w => w.length > 3);\n}\nconst qSet = new Set(tokens(queryText));\n\nconst articles = $input.all().map(i => i.json).filter(j => j && j.fields && j.fields['Content']);\nconst scored = articles.map(a => {\n  const docTokens = tokens(a.fields['Article Title'] + ' ' + a.fields['Content'] + ' ' + (a.fields['Tags'] || []).join(' '));\n  let hits = 0;\n  const seen = new Set();\n  for (const t of docTokens) {\n    if (qSet.has(t) && !seen.has(t)) { hits++; seen.add(t); }\n  }\n  return { article: a, score: qSet.size ? hits / qSet.size : 0 };\n}).filter(s => s.score > 0.05)\n  .sort((x, y) => y.score - x.score)\n  .slice(0, 3);\n\nconst ragContext = scored.length\n  ? scored.map(s => `[${s.article.fields['Article Title']}]\\n${String(s.article.fields['Content']).slice(0, 800)}`).join('\\n\\n---\\n\\n')\n  : '(no relevant knowledge base articles found)';\n\nreturn [{ json: {\n  record_id: ticket.id,\n  ticket_id: tf['Ticket ID'] || ticket.id,\n  category: tf['Category'] || 'General Inquiry',\n  priority: tf['Priority'] || 'Medium',\n  detailed_description: tf['Detailed Description'] || tf['Issue Summary'] || '',\n  ragContext,\n  kb_articles_used: scored.map(s => s.article.fields['Article Title']),\n}}];"
+      },
+      "id": "c4-code-rank-kb",
+      "name": "Code - Rank KB Snippets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-5',\n  max_tokens: 500,\n  temperature: 0.3,\n  system: \"You are a customer support assistant drafting a suggested reply for a human agent to review and edit before sending. Be empathetic, concise, and specific to the customer's issue. Do not promise resolutions or timelines you cannot verify. Return plain text only (no JSON).\",\n  messages: [\n    {\n      role: 'user',\n      content: 'Ticket Category: ' + $json.category + '\\nPriority: ' + $json.priority + '\\nCustomer Issue: ' + $json.detailed_description + '\\nRelevant Knowledge Base Snippets (if any):\\n\"\"\"\\n' + $json.ragContext + '\\n\"\"\"\\n\\nDraft a suggested reply (max 150 words).'\n    }\n  ]\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "c5-http-claude-reply",
+      "name": "HTTP Request - Claude Reply Draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ANTHROPIC_API_KEY",
+          "name": "Anthropic API (x-api-key header)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "AIRTABLE_BASE_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Tickets",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Code - Rank KB Snippets').first().json.record_id }}",
+            "Suggested Reply": "={{ ($json.content?.[0]?.text || '').trim() }}"
+          },
+          "matchingColumns": ["id"]
+        },
+        "options": {}
+      },
+      "id": "c6-airtable-save-reply",
+      "name": "Airtable - Save Suggested Reply",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1100, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "AIRTABLE_API_KEY",
+          "name": "Airtable Support Base"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  ok: true,\n  ticket_id: $('Code - Rank KB Snippets').first().json.ticket_id,\n  kb_articles_used: $('Code - Rank KB Snippets').first().json.kb_articles_used,\n  message: 'Suggested reply saved to the ticket. Review and edit before sending.'\n}) }}",
+        "options": {}
+      },
+      "id": "c7-respond",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1320, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Suggest Reply": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Get Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Airtable - Get Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Get Ticket": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Fetch Knowledge Base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Fetch Knowledge Base": {
+      "main": [
+        [
+          {
+            "node": "Code - Rank KB Snippets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Rank KB Snippets": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Claude Reply Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Claude Reply Draft": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Save Suggested Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Save Suggested Reply": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "workflow_error_handler"
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "template"
+  }
+}

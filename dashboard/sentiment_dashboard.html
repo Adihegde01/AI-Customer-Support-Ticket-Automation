@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Support Sentiment Dashboard</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1f2430; --muted: #6b7280;
+    --line: #e5e7eb; --accent: #4f46e5;
+    --pos: #16a34a; --neu: #9ca3af; --neg: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+  header { padding: 20px 28px; background: var(--card); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .controls { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; width: 190px; }
+  button { padding: 8px 14px; border: none; border-radius: 8px; font-size: 13px; cursor: pointer; background: var(--accent); color: #fff; }
+  button.secondary { background: #eef0f4; color: var(--ink); }
+  main { padding: 24px 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1200px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .card h2 { font-size: 14px; margin: 0 0 4px; }
+  .card .hint { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+  .wide { grid-column: 1 / -1; }
+  .kpis { display: flex; gap: 14px; flex-wrap: wrap; }
+  .kpi { flex: 1; min-width: 140px; background: var(--bg); border-radius: 10px; padding: 12px 14px; }
+  .kpi .n { font-size: 24px; font-weight: 700; }
+  .kpi .l { font-size: 12px; color: var(--muted); }
+  #status { font-size: 12px; color: var(--muted); }
+  canvas { width: 100%; height: 260px; display: block; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .legend span::before { content: "●"; margin-right: 4px; }
+  .legend .pos::before { color: var(--pos); } .legend .neu::before { color: var(--neu); } .legend .neg::before { color: var(--neg); }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Support Sentiment Dashboard</h1>
+    <div class="sub">Sentiment trends by week and category, straight from the Tickets table</div>
+  </div>
+  <div class="controls">
+    <span id="lastRefresh" style="font-size:12px;color:var(--muted)"></span>
+    <button id="loadBtn">↻ Refresh</button>
+    <button id="demoBtn" class="secondary">Demo data</button>
+  </div>
+  <!-- credentials stored inline; inputs hidden -->
+  <input id="baseId" value="YOUR_AIRTABLE_BASE_ID_HERE" style="display:none">
+  <input id="token" value="YOUR_AIRTABLE_TOKEN_HERE" style="display:none">
+</header>
+
+<main>
+  <div class="card wide">
+    <div class="kpis" id="kpis"></div>
+    <div id="status" style="margin-top:10px">No data loaded yet — connect Airtable or click "Demo data".</div>
+  </div>
+
+  <div class="card wide">
+    <h2>Sentiment over time</h2>
+    <p class="hint">Weekly ticket counts by sentiment (Received At)</p>
+    <canvas id="trendChart" height="260"></canvas>
+    <div class="legend"><span class="pos">Positive</span><span class="neu">Neutral</span><span class="neg">Negative</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Sentiment by category</h2>
+    <p class="hint">Stacked share of sentiment per category</p>
+    <canvas id="categoryChart" height="260"></canvas>
+  </div>
+
+  <div class="card">
+    <h2>Negative-sentiment hotspots</h2>
+    <p class="hint">Categories ranked by share of negative tickets</p>
+    <canvas id="hotspotChart" height="260"></canvas>
+  </div>
+</main>
+
+<script>
+'use strict';
+const SENTIMENTS = ['Positive', 'Neutral', 'Negative'];
+const COLORS = { Positive: '#16a34a', Neutral: '#9ca3af', Negative: '#dc2626' };
+
+// ------------------------------------------------------------- data layer ---
+async function fetchAirtable(baseId, token) {
+  // Paginates through the Tickets table; only the fields the charts need.
+  const fields = ['Sentiment', 'Category', 'Received At', 'Priority'];
+  let records = [], offset = '';
+  do {
+    const params = new URLSearchParams();
+    fields.forEach(f => params.append('fields[]', f));
+    params.set('pageSize', '100');
+    if (offset) params.set('offset', offset);
+    const res = await fetch(`https://api.airtable.com/v0/${baseId}/Tickets?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`Airtable ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const page = await res.json();
+    records = records.concat(page.records || []);
+    offset = page.offset || '';
+  } while (offset);
+  return records.map(r => ({
+    sentiment: r.fields['Sentiment'] || 'Neutral',
+    category: r.fields['Category'] || 'Other',
+    receivedAt: r.fields['Received At'] ? new Date(r.fields['Received At']) : null,
+    priority: r.fields['Priority'] || 'Medium',
+  })).filter(t => t.receivedAt && !isNaN(t.receivedAt));
+}
+
+function demoData() {
+  // Deterministic pseudo-random demo set spanning the last 8 weeks.
+  const cats = ['Technical Support', 'Billing', 'Bug Report', 'Sales Inquiry', 'Feature Request', 'Account Access'];
+  const catNegBias = { 'Billing': 0.45, 'Bug Report': 0.4, 'Technical Support': 0.35, 'Account Access': 0.3, 'Sales Inquiry': 0.08, 'Feature Request': 0.05 };
+  let seed = 42;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const out = [];
+  const now = Date.now();
+  for (let i = 0; i < 240; i++) {
+    const category = cats[Math.floor(rand() * cats.length)];
+    const negP = catNegBias[category], posP = category === 'Feature Request' || category === 'Sales Inquiry' ? 0.5 : 0.2;
+    const roll = rand();
+    const sentiment = roll < negP ? 'Negative' : roll < negP + posP ? 'Positive' : 'Neutral';
+    out.push({
+      sentiment, category,
+      receivedAt: new Date(now - rand() * 56 * 86400000),
+      priority: sentiment === 'Negative' && rand() < 0.4 ? 'High' : 'Medium',
+    });
+  }
+  return out;
+}
+
+// ------------------------------------------------------------ aggregation ---
+function weekKey(d) {
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return monday.toISOString().slice(0, 10);
+}
+
+function aggregate(tickets) {
+  const byWeek = new Map(), byCategory = new Map();
+  for (const t of tickets) {
+    const wk = weekKey(t.receivedAt);
+    if (!byWeek.has(wk)) byWeek.set(wk, { Positive: 0, Neutral: 0, Negative: 0 });
+    byWeek.get(wk)[t.sentiment] = (byWeek.get(wk)[t.sentiment] || 0) + 1;
+    if (!byCategory.has(t.category)) byCategory.set(t.category, { Positive: 0, Neutral: 0, Negative: 0, total: 0 });
+    const c = byCategory.get(t.category);
+    c[t.sentiment] = (c[t.sentiment] || 0) + 1;
+    c.total++;
+  }
+  const weeks = [...byWeek.keys()].sort();
+  return { weeks, byWeek, byCategory };
+}
+
+// ----------------------------------------------------------------- charts ---
+function setupCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = 260;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h };
+}
+
+function drawTrend(tickets) {
+  const { weeks, byWeek } = aggregate(tickets);
+  const { ctx, w, h } = setupCanvas(document.getElementById('trendChart'));
+  const pad = { l: 34, r: 10, t: 12, b: 26 };
+  const max = Math.max(4, ...weeks.map(wk => Math.max(...SENTIMENTS.map(s => byWeek.get(wk)[s] || 0))));
+  const x = i => pad.l + (weeks.length === 1 ? 0 : i * (w - pad.l - pad.r) / (weeks.length - 1));
+  const y = v => h - pad.b - v * (h - pad.t - pad.b) / max;
+
+  ctx.strokeStyle = '#e5e7eb'; ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif';
+  for (let g = 0; g <= 4; g++) {
+    const v = Math.round(max * g / 4), gy = y(v);
+    ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(w - pad.r, gy); ctx.stroke();
+    ctx.fillText(v, 6, gy + 4);
+  }
+  weeks.forEach((wk, i) => {
+    if (weeks.length <= 10 || i % Math.ceil(weeks.length / 8) === 0) {
+      ctx.fillText(wk.slice(5), x(i) - 14, h - 8);
+    }
+  });
+  for (const s of SENTIMENTS) {
+    ctx.strokeStyle = COLORS[s]; ctx.lineWidth = 2; ctx.beginPath();
+    weeks.forEach((wk, i) => {
+      const py = y(byWeek.get(wk)[s] || 0);
+      i === 0 ? ctx.moveTo(x(i), py) : ctx.lineTo(x(i), py);
+    });
+    ctx.stroke();
+    ctx.fillStyle = COLORS[s];
+    weeks.forEach((wk, i) => {
+      ctx.beginPath(); ctx.arc(x(i), y(byWeek.get(wk)[s] || 0), 3, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+}
+
+function drawCategoryStacks(tickets) {
+  const { byCategory } = aggregate(tickets);
+  const cats = [...byCategory.keys()].sort((a, b) => byCategory.get(b).total - byCategory.get(a).total).slice(0, 8);
+  const { ctx, w, h } = setupCanvas(document.getElementById('categoryChart'));
+  const pad = { l: 10, r: 10, t: 12, b: 8 };
+  const rowH = Math.min(30, (h - pad.t - pad.b) / Math.max(cats.length, 1));
+  ctx.font = '11px sans-serif';
+  cats.forEach((cat, i) => {
+    const c = byCategory.get(cat);
+    const yTop = pad.t + i * rowH;
+    let xCur = pad.l + 130;
+    const barW = w - xCur - pad.r - 34;
+    for (const s of SENTIMENTS) {
+      const frac = c.total ? (c[s] || 0) / c.total : 0;
+      ctx.fillStyle = COLORS[s];
+      ctx.fillRect(xCur, yTop + 4, barW * frac, rowH - 10);
+      xCur += barW * frac;
+    }
+    ctx.fillStyle = '#1f2430';
+    ctx.fillText(cat.length > 18 ? cat.slice(0, 17) + '…' : cat, pad.l, yTop + rowH / 2 + 3);
+    ctx.fillStyle = '#6b7280';
+    ctx.fillText(c.total, w - pad.r - 26, yTop + rowH / 2 + 3);
+  });
+}
+
+function drawHotspots(tickets) {
+  const { byCategory } = aggregate(tickets);
+  const rows = [...byCategory.entries()]
+    .map(([cat, c]) => ({ cat, share: c.total ? (c.Negative || 0) / c.total : 0, total: c.total }))
+    .filter(r => r.total >= 3)
+    .sort((a, b) => b.share - a.share)
+    .slice(0, 8);
+  const { ctx, w, h } = setupCanvas(document.getElementById('hotspotChart'));
+  const pad = { l: 10, r: 10, t: 12, b: 8 };
+  const rowH = Math.min(30, (h - pad.t - pad.b) / Math.max(rows.length, 1));
+  ctx.font = '11px sans-serif';
+  rows.forEach((r, i) => {
+    const yTop = pad.t + i * rowH;
+    const barX = pad.l + 130, barW = w - barX - pad.r - 44;
+    ctx.fillStyle = '#f3f4f6';
+    ctx.fillRect(barX, yTop + 4, barW, rowH - 10);
+    ctx.fillStyle = COLORS.Negative;
+    ctx.fillRect(barX, yTop + 4, barW * r.share, rowH - 10);
+    ctx.fillStyle = '#1f2430';
+    ctx.fillText(r.cat.length > 18 ? r.cat.slice(0, 17) + '…' : r.cat, pad.l, yTop + rowH / 2 + 3);
+    ctx.fillStyle = '#6b7280';
+    ctx.fillText(Math.round(r.share * 100) + '%', w - pad.r - 36, yTop + rowH / 2 + 3);
+  });
+}
+
+function drawKpis(tickets) {
+  const total = tickets.length;
+  const neg = tickets.filter(t => t.sentiment === 'Negative').length;
+  const pos = tickets.filter(t => t.sentiment === 'Positive').length;
+  const cutoff = Date.now() - 7 * 86400000;
+  const lastWeek = tickets.filter(t => t.receivedAt.getTime() >= cutoff).length;
+  document.getElementById('kpis').innerHTML = [
+    { n: total, l: 'Total tickets' },
+    { n: lastWeek, l: 'Last 7 days' },
+    { n: total ? Math.round(neg / total * 100) + '%' : '—', l: 'Negative share' },
+    { n: total ? Math.round(pos / total * 100) + '%' : '—', l: 'Positive share' },
+  ].map(k => `<div class="kpi"><div class="n">${k.n}</div><div class="l">${k.l}</div></div>`).join('');
+}
+
+// ------------------------------------------------------------------ wiring ---
+let current = [];
+function render(tickets, sourceLabel) {
+  current = tickets;
+  drawKpis(tickets);
+  drawTrend(tickets);
+  drawCategoryStacks(tickets);
+  drawHotspots(tickets);
+  document.getElementById('status').textContent =
+    `${tickets.length} tickets loaded from ${sourceLabel} at ${new Date().toLocaleTimeString()}.`;
+}
+
+document.getElementById('demoBtn').addEventListener('click', () => render(demoData(), 'demo data'));
+
+async function loadAirtable() {
+  const baseId = document.getElementById('baseId').value.trim();
+  const token = document.getElementById('token').value.trim();
+  const status = document.getElementById('status');
+  status.textContent = 'Loading from Airtable…';
+  try {
+    const tickets = await fetchAirtable(baseId, token);
+    render(tickets, 'Airtable');
+    document.getElementById('lastRefresh').textContent =
+      `Last refreshed: ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    status.textContent = 'Load failed: ' + e.message;
+  }
+}
+
+document.getElementById('loadBtn').addEventListener('click', loadAirtable);
+document.getElementById('demoBtn').addEventListener('click', () => render(demoData(), 'demo data'));
+
+// Auto-load on open, then refresh every 60 s
+document.addEventListener('DOMContentLoaded', loadAirtable);
+setInterval(loadAirtable, 60_000);
+
+window.addEventListener('resize', () => { if (current.length) render(current, 'cache'); });
+</script>
+</body>
+</html>

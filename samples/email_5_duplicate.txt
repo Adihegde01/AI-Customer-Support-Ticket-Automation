@@ -1,0 +1,15 @@
+From: Rahul Menon <rahul.menon@brightpay.io>
+To: support@acmesaas.com
+Subject: Re: URGENT: Production API completely down — all payments failing
+
+Hi again,
+
+Following up on my earlier email — the API is STILL down, now over an hour.
+Has anyone even looked at this yet? We need an update urgently.
+
+Rahul
+
+--- Expected triage ---
+Duplicate of email_1 (same sender + high similarity to an open ticket within
+the 7-day window). Should be appended to the existing ticket's Internal Notes
+and linked via "Linked Duplicate Of" — NOT created as a new ticket.

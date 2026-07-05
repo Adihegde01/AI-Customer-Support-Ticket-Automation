@@ -1,0 +1,22 @@
+From: Daniel Osei <daniel@kumasilogistics.com>
+To: support@acmesaas.com
+Subject: Pricing for 50-seat team?
+
+Hi there,
+
+We're a logistics company evaluating your platform for our operations team of
+about 50 people. Could someone share enterprise pricing, whether you offer
+annual billing discounts, and if there's a trial that includes the API access
+tier?
+
+Happy to jump on a call this week if that's easier.
+
+Thanks,
+Daniel Osei
+Operations Director, Kumasi Logistics
+
+--- Expected triage ---
+Category: Sales Inquiry
+Priority: Low
+Sentiment: Positive
+Assigned Team: Sales

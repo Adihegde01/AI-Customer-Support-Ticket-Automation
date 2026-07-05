@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Support Ticket Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d0f17;--surface:#141720;--card:#1a1e2e;--border:#252a3d;--text:#e2e8f0;--muted:#64748b;--accent:#6366f1;--accent2:#8b5cf6;--pos:#10b981;--neg:#ef4444;--warn:#f59e0b;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
+header{background:linear-gradient(135deg,#141720,#1a1e2e);border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);}
+.logo{display:flex;align-items:center;gap:10px;}
+.logo-icon{width:36px;height:36px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;}
+.logo h1{font-size:15px;font-weight:600;}
+.logo .sub{font-size:11px;color:var(--muted);}
+.header-right{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+#statusBadge{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:6px 12px;border-radius:20px;}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--pos);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+.refresh-btn{padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px;transition:.2s;}
+.refresh-btn:hover{opacity:.85;transform:translateY(-1px);}
+.refresh-btn.spinning svg{animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+main{padding:24px 28px;max-width:1500px;margin:0 auto;}
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:14px;margin-bottom:22px;}
+.kpi-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px;position:relative;overflow:hidden;transition:.2s;}
+.kpi-card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(99,102,241,.07),transparent);pointer-events:none;}
+.kpi-card:hover{border-color:rgba(99,102,241,.4);transform:translateY(-2px);}
+.kpi-label{font-size:10px;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px;}
+.kpi-val{font-size:28px;font-weight:700;line-height:1;}
+.kpi-sub{font-size:11px;color:var(--muted);margin-top:6px;}
+.kpi-icon{position:absolute;right:14px;top:14px;font-size:22px;opacity:.15;}
+.charts-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:22px;}
+@media(max-width:900px){.charts-row{grid-template-columns:1fr 1fr;}}
+@media(max-width:580px){.charts-row{grid-template-columns:1fr;}}
+.chart-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px;}
+.chart-card h3{font-size:13px;font-weight:600;margin-bottom:3px;}
+.chart-card .hint{font-size:11px;color:var(--muted);margin-bottom:14px;}
+canvas{display:block;width:100%!important;}
+.filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center;}
+.filters input,.filters select{background:var(--card);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;font-family:inherit;transition:.2s;outline:none;}
+.filters input{width:200px;}
+.filters input:focus,.filters select:focus{border-color:var(--accent);}
+.filters select option{background:var(--card);}
+.clear-btn{padding:8px 12px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;font-size:12px;cursor:pointer;transition:.2s;}
+.clear-btn:hover{border-color:var(--accent);color:var(--text);}
+#resultCount{font-size:12px;color:var(--muted);margin-left:auto;}
+.table-wrap{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:auto;margin-bottom:24px;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+thead th{background:var(--surface);color:var(--muted);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:11px 14px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--border);position:sticky;top:0;cursor:pointer;user-select:none;transition:.2s;}
+thead th:hover{color:var(--text);}
+thead th.sort-asc::after{content:' ↑';}
+thead th.sort-desc::after{content:' ↓';}
+tbody tr{border-bottom:1px solid rgba(37,42,61,.7);transition:.12s;}
+tbody tr:last-child{border-bottom:none;}
+tbody tr:hover{background:rgba(99,102,241,.05);}
+td{padding:10px 14px;white-space:nowrap;vertical-align:middle;}
+td.wrap{white-space:normal;max-width:200px;line-height:1.4;}
+td.mono{font-family:monospace;font-size:11px;color:var(--muted);}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;}
+.bc{background:rgba(239,68,68,.15);color:#ef4444;}
+.bh{background:rgba(249,115,22,.15);color:#f97316;}
+.bm{background:rgba(234,179,8,.15);color:#eab308;}
+.bl{background:rgba(34,197,94,.15);color:#22c55e;}
+.bo{background:rgba(99,102,241,.15);color:#818cf8;}
+.bip{background:rgba(59,130,246,.15);color:#60a5fa;}
+.bw{background:rgba(234,179,8,.15);color:#eab308;}
+.br{background:rgba(16,185,129,.15);color:#10b981;}
+.bcl{background:rgba(100,116,139,.15);color:#94a3b8;}
+.bp{background:rgba(16,185,129,.15);color:#10b981;}
+.bn{background:rgba(100,116,139,.15);color:#94a3b8;}
+.bneg{background:rgba(239,68,68,.15);color:#ef4444;}
+.bvip{background:rgba(251,191,36,.15);color:#fbbf24;font-size:10px;}
+.brev{background:rgba(239,68,68,.12);color:#f87171;font-size:10px;}
+.conf-bar{width:54px;height:5px;background:rgba(255,255,255,.08);border-radius:3px;display:inline-block;vertical-align:middle;margin-right:5px;overflow:hidden;}
+.conf-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--accent),var(--accent2));}
+#drawer{position:fixed;right:-480px;top:0;width:480px;height:100vh;background:var(--surface);border-left:1px solid var(--border);overflow-y:auto;z-index:200;transition:.3s cubic-bezier(.4,0,.2,1);box-shadow:-20px 0 60px rgba(0,0,0,.5);}
+#drawer.open{right:0;}
+#dOverlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:190;display:none;backdrop-filter:blur(2px);}
+#dOverlay.show{display:block;}
+.dh{padding:20px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;}
+.dh h2{font-size:15px;font-weight:600;flex:1;}
+.xbtn{background:var(--card);border:1px solid var(--border);color:var(--muted);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:.2s;}
+.xbtn:hover{color:var(--text);}
+.db{padding:20px 22px;}
+.fg{margin-bottom:16px;}
+.fg label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px;}
+.fg .v{font-size:13px;line-height:1.55;}
+.fg .v.m{color:var(--muted);}
+.ddiv{border:none;border-top:1px solid var(--border);margin:14px 0;}
+.tags-wrap{display:flex;flex-wrap:wrap;gap:6px;}
+.tag{background:rgba(99,102,241,.12);color:#818cf8;padding:3px 9px;border-radius:12px;font-size:11px;}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.loader{display:flex;align-items:center;justify-content:center;gap:10px;padding:60px;color:var(--muted);}
+.spinner{width:22px;height:22px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
+.empty{text-align:center;padding:60px;color:var(--muted);}
+.empty .ic{font-size:40px;margin-bottom:12px;opacity:.3;}
+footer{text-align:center;font-size:11px;color:var(--muted);padding:18px;border-top:1px solid var(--border);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🎫</div>
+    <div>
+      <h1>Support Ticket Dashboard</h1>
+      <div class="sub">AI-powered · Live from Airtable</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div id="statusBadge"><span class="dot"></span><span id="statusText">Loading…</span></div>
+    <button class="refresh-btn" id="refreshBtn" onclick="load()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+      Refresh
+    </button>
+  </div>
+</header>
+
+<main>
+  <div class="kpi-row">
+    <div class="kpi-card"><div class="kpi-label">Total Tickets</div><div class="kpi-val" id="k-tot">—</div><div class="kpi-sub" id="k-tots"></div><div class="kpi-icon">🎫</div></div>
+    <div class="kpi-card"><div class="kpi-label">Open</div><div class="kpi-val" id="k-open" style="color:#818cf8">—</div><div class="kpi-sub" id="k-opens"></div><div class="kpi-icon">📬</div></div>
+    <div class="kpi-card"><div class="kpi-label">Critical / High</div><div class="kpi-val" id="k-crit" style="color:#ef4444">—</div><div class="kpi-sub" id="k-crits"></div><div class="kpi-icon">🔥</div></div>
+    <div class="kpi-card"><div class="kpi-label">Negative Sentiment</div><div class="kpi-val" id="k-neg" style="color:#ef4444">—</div><div class="kpi-sub" id="k-negs"></div><div class="kpi-icon">😠</div></div>
+    <div class="kpi-card"><div class="kpi-label">Avg Confidence</div><div class="kpi-val" id="k-conf" style="color:#6366f1">—</div><div class="kpi-sub" id="k-confs"></div><div class="kpi-icon">🎯</div></div>
+    <div class="kpi-card"><div class="kpi-label">Needs Review</div><div class="kpi-val" id="k-rev" style="color:#f97316">—</div><div class="kpi-sub" id="k-revs"></div><div class="kpi-icon">👁</div></div>
+  </div>
+
+  <div class="charts-row">
+    <div class="chart-card"><h3>Priority Breakdown</h3><p class="hint">Distribution by severity</p><canvas id="cPri" height="200"></canvas></div>
+    <div class="chart-card"><h3>Status Pipeline</h3><p class="hint">Lifecycle stage</p><canvas id="cSta" height="200"></canvas></div>
+    <div class="chart-card"><h3>Category Volume</h3><p class="hint">Top categories</p><canvas id="cCat" height="200"></canvas></div>
+  </div>
+
+  <div class="filters">
+    <input id="qSearch" type="text" placeholder="🔍  Search tickets…" oninput="applyF()">
+    <select id="fPri" onchange="applyF()"><option value="">All Priorities</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select>
+    <select id="fSta" onchange="applyF()"><option value="">All Statuses</option><option>Open</option><option>In Progress</option><option>Waiting for Customer</option><option>Resolved</option><option>Closed</option></select>
+    <select id="fCat" onchange="applyF()"><option value="">All Categories</option><option>Technical Support</option><option>Billing</option><option>Bug Report</option><option>Sales Inquiry</option><option>Feature Request</option><option>Account Access</option><option>Refund Request</option><option>General Inquiry</option><option>Other</option></select>
+    <select id="fSen" onchange="applyF()"><option value="">All Sentiments</option><option>Positive</option><option>Neutral</option><option>Negative</option></select>
+    <button class="clear-btn" onclick="clearF()">✕ Clear</button>
+    <span id="rCount"></span>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th onclick="sBy('Ticket ID')">Ticket ID</th>
+        <th onclick="sBy('Received At')">Received</th>
+        <th onclick="sBy('Customer Name')">Customer</th>
+        <th onclick="sBy('Company')">Company</th>
+        <th>Subject / Summary</th>
+        <th onclick="sBy('Category')">Category</th>
+        <th onclick="sBy('Priority')">Priority</th>
+        <th onclick="sBy('Status')">Status</th>
+        <th onclick="sBy('Sentiment')">Sentiment</th>
+        <th onclick="sBy('Assigned Team')">Team</th>
+        <th onclick="sBy('Confidence Score')">Conf.</th>
+        <th>Flags</th>
+      </tr></thead>
+      <tbody id="tBody"><tr><td colspan="12"><div class="loader"><div class="spinner"></div>Loading…</div></td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<div id="dOverlay" onclick="closeD()"></div>
+<div id="drawer">
+  <div class="dh"><h2 id="dTitle">Ticket Detail</h2><button class="xbtn" onclick="closeD()">✕</button></div>
+  <div class="db" id="dBody"></div>
+</div>
+
+<footer id="foot">Support Ticket Automation · auto-refreshes every 60 s</footer>
+
+<script>
+'use strict';
+const TOKEN='YOUR_AIRTABLE_TOKEN_HERE';
+const BASE='YOUR_AIRTABLE_BASE_ID_HERE';
+let all=[],fil=[],sCol='Received At',sDir=-1;
+
+async function fetchAll(){
+  const fields=['Ticket ID','Message ID','Email Subject','Sender Email','Sender Name','Customer Name','Company','Issue Summary','Detailed Description','Email Body','Category','Priority','Status','Sentiment','Product/Service','Suggested Department','Tags','Confidence Score','Priority Justification','Priority Source','Assigned Team','Internal Notes','Needs Manual Review','VIP Flag','Ack Sent At','Last Updated','Detected Language','Received At'];
+  let recs=[],off='';
+  do{
+    const p=new URLSearchParams();
+    fields.forEach(f=>p.append('fields[]',f));
+    p.set('pageSize','100');
+    if(off)p.set('offset',off);
+    const r=await fetch(`https://api.airtable.com/v0/${BASE}/Tickets?${p}`,{headers:{Authorization:`Bearer ${TOKEN}`}});
+    if(!r.ok)throw new Error(`Airtable ${r.status}`);
+    const d=await r.json();
+    recs=recs.concat(d.records||[]);
+    off=d.offset||'';
+  }while(off);
+  return recs.map(r=>({_id:r.id,...r.fields}));
+}
+
+async function load(){
+  const btn=document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  document.getElementById('statusText').textContent='Refreshing…';
+  try{
+    all=await fetchAll();
+    applyF();renderKpis(all);renderCharts(all);
+    const t=new Date().toLocaleTimeString();
+    document.getElementById('statusText').textContent=`${all.length} tickets · ${t}`;
+    document.getElementById('foot').textContent=`Support Ticket Automation · Last refreshed ${t} · Auto-refresh every 60 s`;
+  }catch(e){
+    document.getElementById('statusText').textContent='Error: '+e.message;
+    document.getElementById('tBody').innerHTML=`<tr><td colspan="12"><div class="empty"><div class="ic">⚠️</div>${e.message}</div></td></tr>`;
+  }finally{btn.classList.remove('spinning');}
+}
+
+function renderKpis(t){
+  const n=t.length;
+  const open=t.filter(x=>x.Status==='Open').length;
+  const crit=t.filter(x=>['Critical','High'].includes(x.Priority)).length;
+  const neg=t.filter(x=>x.Sentiment==='Negative').length;
+  const cs=t.map(x=>x['Confidence Score']).filter(Number.isFinite);
+  const avg=cs.length?cs.reduce((a,b)=>a+b,0)/cs.length:0;
+  const rev=t.filter(x=>x['Needs Manual Review']).length;
+  s('k-tot',n);s('k-tots',`${t.filter(x=>['Resolved','Closed'].includes(x.Status)).length} resolved`);
+  s('k-open',open);s('k-opens',`${n?Math.round(open/n*100):0}% of total`);
+  s('k-crit',crit);s('k-crits',`${n?Math.round(crit/n*100):0}% of total`);
+  s('k-neg',neg);s('k-negs',`${n?Math.round(neg/n*100):0}% of total`);
+  s('k-conf',avg.toFixed(2));s('k-confs',`across ${cs.length} tickets`);
+  s('k-rev',rev);s('k-revs','need agent attention');
+}
+function s(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
+
+const PC={Critical:'#ef4444',High:'#f97316',Medium:'#eab308',Low:'#22c55e'};
+const SC={'Open':'#6366f1','In Progress':'#3b82f6','Waiting for Customer':'#eab308','Resolved':'#10b981','Closed':'#475569'};
+const CC=['#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#eab308','#10b981','#06b6d4','#3b82f6'];
+
+function renderCharts(t){
+  donut('cPri',cnt(t,'Priority'),PC);
+  donut('cSta',cnt(t,'Status'),SC);
+  bars('cCat',cnt(t,'Category'),CC);
+}
+function cnt(t,f){const m={};t.forEach(x=>{const v=x[f]||'Unknown';m[v]=(m[v]||0)+1;});return m;}
+
+function donut(id,data,cols){
+  const cv=document.getElementById(id);
+  const dpr=window.devicePixelRatio||1;
+  const W=cv.clientWidth,H=200;
+  cv.width=W*dpr;cv.height=H*dpr;
+  const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,W,H);
+  const ents=Object.entries(data).sort((a,b)=>b[1]-a[1]);
+  const tot=ents.reduce((s,[,v])=>s+v,0);if(!tot)return;
+  const cx=W/2-55,cy=H/2,r=Math.min(cx,cy)-8,ri=r*.58;
+  let ang=-Math.PI/2;
+  ents.forEach(([k,v],i)=>{
+    const sl=2*Math.PI*v/tot;
+    const col=cols[k]||CC[i%CC.length];
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,ang,ang+sl);ctx.closePath();
+    ctx.fillStyle=col;ctx.fill();ang+=sl;
+  });
+  ctx.beginPath();ctx.arc(cx,cy,ri,0,2*Math.PI);ctx.fillStyle='#1a1e2e';ctx.fill();
+  const lx=W-118,ly0=(H-ents.length*18)/2;
+  ctx.font='10px Inter,sans-serif';
+  ents.forEach(([k,v],i)=>{
+    const col=cols[k]||CC[i%CC.length];
+    const y=ly0+i*18+5;
+    ctx.fillStyle=col;ctx.fillRect(lx,y-8,10,10);
+    ctx.fillStyle='#64748b';ctx.textAlign='left';
+    ctx.fillText(`${k} (${v})`,lx+14,y);
+  });
+}
+
+function bars(id,data,cols){
+  const cv=document.getElementById(id);
+  const dpr=window.devicePixelRatio||1;
+  const W=cv.clientWidth,H=200;
+  cv.width=W*dpr;cv.height=H*dpr;
+  const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,W,H);
+  const ents=Object.entries(data).sort((a,b)=>b[1]-a[1]).slice(0,7);
+  const mx=Math.max(...ents.map(([,v])=>v));
+  const pad={l:8,r:8,t:10,b:44};
+  const bw=(W-pad.l-pad.r)/ents.length;
+  ctx.font='10px Inter,sans-serif';
+  ents.forEach(([k,v],i)=>{
+    const bh=(H-pad.t-pad.b)*(v/mx);
+    const x=pad.l+i*bw+bw*.12;const bwi=bw*.76;const y=H-pad.b-bh;
+    const g=ctx.createLinearGradient(0,y,0,H-pad.b);
+    g.addColorStop(0,cols[i%cols.length]);g.addColorStop(1,cols[i%cols.length]+'44');
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.moveTo(x+4,y);ctx.lineTo(x+bwi-4,y);
+    ctx.quadraticCurveTo(x+bwi,y,x+bwi,y+4);ctx.lineTo(x+bwi,y+bh);ctx.lineTo(x,y+bh);ctx.lineTo(x,y+4);
+    ctx.quadraticCurveTo(x,y,x+4,y);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#e2e8f0';ctx.textAlign='center';ctx.fillText(v,x+bwi/2,y-4);
+    ctx.save();ctx.translate(x+bwi/2,H-pad.b+6);ctx.rotate(-.45);
+    ctx.fillStyle='#64748b';ctx.textAlign='right';
+    ctx.fillText(k.length>13?k.slice(0,12)+'…':k,0,0);ctx.restore();
+  });
+}
+
+function applyF(){
+  const q=document.getElementById('qSearch').value.toLowerCase();
+  const pri=document.getElementById('fPri').value;
+  const sta=document.getElementById('fSta').value;
+  const cat=document.getElementById('fCat').value;
+  const sen=document.getElementById('fSen').value;
+  fil=all.filter(t=>{
+    if(pri&&t.Priority!==pri)return false;
+    if(sta&&t.Status!==sta)return false;
+    if(cat&&t.Category!==cat)return false;
+    if(sen&&t.Sentiment!==sen)return false;
+    if(q){
+      const h=[t['Ticket ID'],t['Customer Name'],t.Company,t['Email Subject'],t['Issue Summary'],t['Sender Email'],t.Category,t['Assigned Team'],t.Tags].join(' ').toLowerCase();
+      if(!h.includes(q))return false;
+    }
+    return true;
+  });
+  doSort();renderTable(fil);
+  document.getElementById('rCount').textContent=fil.length===all.length?`${all.length} tickets`:`${fil.length} of ${all.length}`;
+}
+function clearF(){['qSearch','fPri','fSta','fCat','fSen'].forEach(id=>{document.getElementById(id).value='';});applyF();}
+function sBy(col){if(sCol===col)sDir*=-1;else{sCol=col;sDir=1;}doSort();renderTable(fil);}
+function doSort(){fil.sort((a,b)=>{const av=a[sCol]||'',bv=b[sCol]||'';return av<bv?-sDir:av>bv?sDir:0;});}
+
+function priB(p){const c={Critical:'bc',High:'bh',Medium:'bm',Low:'bl'}[p]||'';const ic={Critical:'🔴',High:'🟠',Medium:'🟡',Low:'🟢'}[p]||'';return`<span class="badge ${c}">${ic} ${p||'—'}</span>`;}
+function staB(s){const c={'Open':'bo','In Progress':'bip','Waiting for Customer':'bw','Resolved':'br','Closed':'bcl'}[s]||'';return`<span class="badge ${c}">${s||'—'}</span>`;}
+function senB(s){const c={Positive:'bp',Neutral:'bn',Negative:'bneg'}[s]||'';const ic={Positive:'😊',Neutral:'😐',Negative:'😠'}[s]||'';return`<span class="badge ${c}">${ic} ${s||'—'}</span>`;}
+function confB(v){const p=Math.round((v||0)*100);return`<div class="conf-bar"><div class="conf-fill" style="width:${p}%"></div></div>${p}%`;}
+function fd(iso){if(!iso)return'—';const d=new Date(iso);return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}
+function e(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function renderTable(tickets){
+  const tb=document.getElementById('tBody');
+  if(!tickets.length){tb.innerHTML=`<tr><td colspan="12"><div class="empty"><div class="ic">🔍</div>No tickets match your filters.</div></td></tr>`;return;}
+  tb.innerHTML=tickets.map(t=>`
+    <tr onclick="openD('${t._id}')" style="cursor:pointer">
+      <td class="mono">${e(t['Ticket ID']||'—')}</td>
+      <td style="font-size:11px;color:var(--muted)">${fd(t['Received At'])}</td>
+      <td><div style="font-weight:500">${e(t['Customer Name']||t['Sender Name']||'—')}</div><div style="font-size:11px;color:var(--muted)">${e(t['Sender Email']||'')}</div></td>
+      <td style="color:var(--muted);font-size:12px">${e(t.Company||'—')}</td>
+      <td class="wrap"><div style="font-weight:500;font-size:12px">${e((t['Email Subject']||'').slice(0,48))}${(t['Email Subject']||'').length>48?'…':''}</div><div style="font-size:11px;color:var(--muted)">${e((t['Issue Summary']||'').slice(0,58))}${(t['Issue Summary']||'').length>58?'…':''}</div></td>
+      <td style="font-size:12px">${e(t.Category||'—')}</td>
+      <td>${priB(t.Priority)}</td>
+      <td>${staB(t.Status)}</td>
+      <td>${senB(t.Sentiment)}</td>
+      <td style="font-size:12px;color:var(--muted)">${e(t['Assigned Team']||'—')}</td>
+      <td>${confB(t['Confidence Score'])}</td>
+      <td>${t['VIP Flag']?'<span class="badge bvip">⭐ VIP</span> ':''} ${t['Needs Manual Review']?'<span class="badge brev">👁</span>':''}</td>
+    </tr>`).join('');
+}
+
+function openD(id){
+  const t=all.find(x=>x._id===id);if(!t)return;
+  document.getElementById('dTitle').textContent=t['Ticket ID']||'Ticket';
+  const tags=(t.Tags||'').split(',').map(x=>x.trim()).filter(Boolean);
+  document.getElementById('dBody').innerHTML=`
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">${priB(t.Priority)} ${staB(t.Status)} ${senB(t.Sentiment)} ${t['VIP Flag']?'<span class="badge bvip">⭐ VIP</span>':''} ${t['Needs Manual Review']?'<span class="badge brev">👁 Needs Review</span>':''}</div>
+    <hr class="ddiv">
+    <div class="fg"><label>Customer</label><div class="v">${e(t['Customer Name']||t['Sender Name']||'—')}</div></div>
+    <div class="fg"><label>Company</label><div class="v">${e(t.Company||'—')}</div></div>
+    <div class="fg"><label>Email</label><div class="v">${e(t['Sender Email']||'—')}</div></div>
+    <div class="fg"><label>Subject</label><div class="v">${e(t['Email Subject']||'—')}</div></div>
+    <div class="fg"><label>Received</label><div class="v m">${fd(t['Received At'])}</div></div>
+    <hr class="ddiv">
+    <div class="fg"><label>Issue Summary</label><div class="v">${e(t['Issue Summary']||'—')}</div></div>
+    <div class="fg"><label>Detailed Description</label><div class="v" style="line-height:1.6">${e(t['Detailed Description']||'—')}</div></div>
+    <div class="fg"><label>Email Body</label><div class="v m" style="font-size:12px;line-height:1.6;max-height:110px;overflow-y:auto;background:rgba(255,255,255,.03);padding:8px;border-radius:6px">${e(t['Email Body']||'—')}</div></div>
+    <hr class="ddiv">
+    <div class="g2">
+      <div class="fg"><label>Category</label><div class="v">${e(t.Category||'—')}</div></div>
+      <div class="fg"><label>Priority Source</label><div class="v m">${e(t['Priority Source']||'—')}</div></div>
+      <div class="fg"><label>Assigned Team</label><div class="v">${e(t['Assigned Team']||'—')}</div></div>
+      <div class="fg"><label>Suggested Dept.</label><div class="v m">${e(t['Suggested Department']||'—')}</div></div>
+      <div class="fg"><label>Product/Service</label><div class="v">${e(t['Product/Service']||'—')}</div></div>
+      <div class="fg"><label>Confidence</label><div class="v">${confB(t['Confidence Score'])}</div></div>
+    </div>
+    <div class="fg"><label>Priority Justification</label><div class="v m" style="font-size:12px">${e(t['Priority Justification']||'—')}</div></div>
+    ${tags.length?`<div class="fg"><label>Tags</label><div class="tags-wrap">${tags.map(x=>`<span class="tag">${e(x)}</span>`).join('')}</div></div>`:''}
+    <hr class="ddiv">
+    <div class="fg"><label>Internal Notes</label><div class="v m" style="font-size:12px;line-height:1.6">${e(t['Internal Notes']||'None')}</div></div>
+    <div class="g2">
+      <div class="fg"><label>Ack Sent At</label><div class="v m">${fd(t['Ack Sent At'])}</div></div>
+      <div class="fg"><label>Last Updated</label><div class="v m">${fd(t['Last Updated'])}</div></div>
+      <div class="fg"><label>Language</label><div class="v m">${e(t['Detected Language']||'en')}</div></div>
+      <div class="fg"><label>Message ID</label><div class="v m" style="font-size:10px;word-break:break-all">${e(t['Message ID']||'—')}</div></div>
+    </div>`;
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('dOverlay').classList.add('show');
+}
+function closeD(){document.getElementById('drawer').classList.remove('open');document.getElementById('dOverlay').classList.remove('show');}
+
+load();
+setInterval(load,60000);
+window.addEventListener('resize',()=>{if(all.length)renderCharts(all);});
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+[
+  {
+    "title": "Troubleshooting API downtime and 503 errors",
+    "content": "If api.acmesaas.com returns 503 errors: 1) Check status.acmesaas.com for a declared incident. 2) Verify your integration retries with exponential backoff rather than failing hard. 3) During a declared outage, payment webhooks are queued and replayed automatically once service is restored — no transactions are lost. 4) Enterprise customers can reach the on-call engineer via their priority support line.",
+    "tags": ["api", "outage", "technical"]
+  },
+  {
+    "title": "Duplicate charges and refund process",
+    "content": "Duplicate subscription charges are reversed within 3-5 business days once confirmed by Finance. Customers should not dispute the charge with their bank first, as chargebacks delay the refund. Finance verifies the duplicate against the billing ledger and issues the refund to the original payment method, with a confirmation email at each step.",
+    "tags": ["billing", "refund", "charges"]
+  },
+  {
+    "title": "Enterprise pricing and volume discounts",
+    "content": "Enterprise plans start at 25 seats and include API access, SSO, and a dedicated customer success manager. Annual billing carries a 15% discount over monthly. Trials of the enterprise tier run 14 days and include full API access. Sales can arrange a guided evaluation for teams over 50 seats.",
+    "tags": ["sales", "pricing", "enterprise"]
+  },
+  {
+    "title": "Submitting and tracking feature requests",
+    "content": "Feature requests are logged in the public roadmap portal. Product reviews requests monthly; customers on the request thread are notified when status changes to Planned, In Progress, or Shipped. Scheduled PDF exports and report distribution are among the most requested items currently under review.",
+    "tags": ["product", "feature request", "roadmap"]
+  },
+  {
+    "title": "Account access and password recovery",
+    "content": "For login failures: password reset links expire after 60 minutes; SSO users must reset through their identity provider, not the app. If all users in an organization cannot log in, check the SSO certificate expiry in Admin Settings — expired SAML certificates are the most common cause of organization-wide lockouts.",
+    "tags": ["account", "login", "sso"]
+  }
+]

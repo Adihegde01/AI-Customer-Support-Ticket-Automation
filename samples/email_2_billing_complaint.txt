@@ -1,0 +1,22 @@
+From: Sarah Klein <s.klein@nordicretail.se>
+To: support@acmesaas.com
+Subject: Charged twice this month — very disappointed
+
+Hello,
+
+I just checked my statement and we were charged twice for our Pro subscription
+this month ($299 on the 1st and again on the 3rd). This is the second time a
+billing error has happened in three months and honestly I'm getting tired of
+having to chase you for refunds.
+
+Please reverse the duplicate charge and explain how you'll make sure this
+doesn't keep happening. If this happens again we will look at other vendors.
+
+Sarah Klein
+Finance Manager, Nordic Retail AB
+
+--- Expected triage ---
+Category: Billing
+Priority: High (angry tone, churn risk, repeated billing failure)
+Sentiment: Negative
+Assigned Team: Finance

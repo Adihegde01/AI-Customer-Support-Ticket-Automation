@@ -1,0 +1,47 @@
+{
+  "categories": [
+    "Technical Support", "Billing", "Sales Inquiry", "Feature Request",
+    "Bug Report", "Account Access", "Refund Request", "General Inquiry", "Other"
+  ],
+  "priorities": ["Critical", "High", "Medium", "Low"],
+  "sentiments": ["Positive", "Neutral", "Negative"],
+  "defaults": {
+    "category": "General Inquiry",
+    "priority": "Medium",
+    "sentiment": "Neutral",
+    "department": "General Support"
+  },
+  "criticalKeywords": [
+    "outage", "down", "security breach", "data loss",
+    "cannot login for all users", "payment failed for all"
+  ],
+  "highKeywords": ["urgent", "asap", "escalate", "angry", "cancel my subscription"],
+  "teamMap": {
+    "Technical Support": "Technical Support",
+    "Bug Report": "Technical Support",
+    "Billing": "Finance",
+    "Refund Request": "Finance",
+    "Sales Inquiry": "Sales",
+    "Account Access": "Customer Success",
+    "Feature Request": "Product Team",
+    "General Inquiry": "Customer Success",
+    "Other": "Customer Success"
+  },
+  "defaultTeam": "Customer Success",
+  "slaTargetsMinutes": { "Critical": 60, "High": 240, "Medium": 1440, "Low": 2880 },
+  "slaEstimateLabels": {
+    "Critical": "1 hour",
+    "High": "4 hours",
+    "Medium": "1 business day",
+    "Low": "2 business days"
+  },
+  "nearBreachRatio": 0.8,
+  "confidenceReviewThreshold": 0.6,
+  "duplicateWindowDays": 7,
+  "duplicateSimilarityThreshold": 0.6,
+  "notifyPriorities": ["Critical", "High"],
+  "pollIntervalSeconds": 60,
+  "slaCheckIntervalSeconds": 900,
+  "companyName": "Acme SaaS",
+  "webhookPort": 8788
+}

@@ -1,0 +1,21 @@
+{
+  "name": "support-ticket-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI customer support ticket automation — email intake, Claude triage, Airtable tickets, SLA monitoring",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "demo": "node src/demo.js",
+    "test": "node tests/unit_tests.js && node tests/integration_tests.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "imapflow": "^1.0.164",
+    "mailparser": "^3.7.1",
+    "nodemailer": "^6.9.14"
+  }
+}

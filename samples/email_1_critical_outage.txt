@@ -1,0 +1,23 @@
+From: Rahul Menon <rahul.menon@brightpay.io>
+To: support@acmesaas.com
+Subject: URGENT: Production API completely down — all payments failing
+
+Hi,
+
+Our entire production integration with your API has been down since 09:40 IST.
+Every request to api.acmesaas.com returns 503. Payment processing for ALL of
+our customers has stopped — we are losing transactions every minute this
+continues.
+
+This is a full outage on your side. Please escalate immediately and treat this
+as a P1. Our account is BrightPay (enterprise plan).
+
+Rahul Menon
+CTO, BrightPay
++91 98450 xxxxx
+
+--- Expected triage ---
+Category: Technical Support
+Priority: Critical (outage + payment failure + escalation language)
+Sentiment: Negative
+Assigned Team: Technical Support
